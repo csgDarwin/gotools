@@ -2,7 +2,6 @@
 """
 go2fix: Identifies conserved positions in DNA multiple sequence alignments.
 
-
 -o / --output takes a FULL output path (directory + filename). Parent
 directories are created automatically.
 """
@@ -357,7 +356,7 @@ def go2fix_single(
         out_filename = default_output_filename(in_filename, default_output_dir)
     _ensure_parent_dir(out_filename)
 
-    print(f"=== Go2Fix Optimized v2 (single-threaded) ===", file=sys.stderr)
+    print(f"=== Go2Fix (single-threaded) ===", file=sys.stderr)
     start_time = time.time()
 
     file_opener = gzip.open if is_gzipped else open
@@ -423,9 +422,9 @@ def main():
 Parent directories are created automatically.
 
 Examples:
-  python go2fix.optimizedfilename.v2.py alignment.maf.gz -o out/mybed.bed
-  python go2fix.optimizedfilename.v2.py alignment.maf -o results/run1/conserved.bed --workers 16 -m 200
-  python go2fix.optimizedfilename.v2.py alignment.maf
+  python go2fix.py alignment.maf.gz -o out/mybed.bed
+  python go2fix.py alignment.maf -o results/run1/conserved.bed --workers 16 -m 200
+  python go2fix.py alignment.maf
   # Output (no -o): fixed_sites/alignment_conserved.bed
         """,
     )

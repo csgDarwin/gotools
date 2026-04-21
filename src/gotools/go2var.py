@@ -479,7 +479,7 @@ def go2var_sorted_optimized(
         verbose=verbose
     )
 
-    print(f"=== Go2Var_s Optimized (name-fixed) ===", file=sys.stderr)
+    print(f"=== Go2Var ===", file=sys.stderr)
     print(f"Input: {in_file}", file=sys.stderr)
     print(f"Output: {out_file}", file=sys.stderr)
     print(f"Workers: {num_workers}", file=sys.stderr)
@@ -548,29 +548,24 @@ def go2var_sorted_optimized(
 def main():
     """Console script entry point."""
     parser = argparse.ArgumentParser(
-        description="Go2Var_s Optimized (name-fixed): High-performance integrated Sort + Variant pipeline",
+        description="Go2Var: High-performance integrated Sort + Variant pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Performance improvements over v4:
-  - Custom MAF parser (no BioPython) - 5-10x faster parsing
+  - Custom MAF parser 
   - NumPy vectorized variant detection - processes entire blocks at once
   - Byte-level sequence operations
   - Larger I/O buffers (8-16MB)
   - Maintains all filtering/reordering logic
 
-Name fix vs Go2Var_s.optimized.py:
-  - Uses MAF `src` unchanged as BED column 1 for all species.
-  - Avoids the duplicated-prefix output (e.g. panTro6.panTro6.chr1) produced
-    when the reference block is not hg38.
-
 Examples:
-  python Go2Var_s.optimizedname.py input.maf config.json
+  python go2var.py input.maf config.json
   # Output: input.bed
 
-  python Go2Var_s.optimizedname.py input.maf.gz config.json -w 8 --merge
+  python go2var.py input.maf.gz config.json -w 8 --merge
   # Output: input.bed
 
-  python Go2Var_s.optimizedname.py input.maf config.json custom_output.bed
+  python go2var.py input.maf config.json custom_output.bed
         """
     )
     parser.add_argument("input_file", type=str, help="Input MAF file")

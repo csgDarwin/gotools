@@ -71,7 +71,7 @@ go2var input.maf.gz config.json output.bed --workers 8
 - `output.bed` — output BED file
 - `--workers` — number of worker processes
 - `--merge` — merge adjacent variant positions
-- `--include-gaps` — include gap positions in the output
+
 
 See `go2var --help` for full options.
 
