@@ -1,0 +1,27 @@
+[project]
+name = "gotools"
+version = "0.1.0"
+description = "Fast conserved-site and variant detection from MAF multiple sequence alignments"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "csgDarwin", email = "csg2darwin@gmail.com" }]
+requires-python = ">=3.8"
+dependencies = ["numpy>=1.20"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+[project.scripts]
+go2fix = "gotools.go2fix:main"
+go2var = "gotools.go2var:main"
+
+[project.urls]
+Repository = "https://github.com/csgDarwin/gotools"
+Issues     = "https://github.com/csgDarwin/gotools/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

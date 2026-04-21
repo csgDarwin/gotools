@@ -1,0 +1,14 @@
+{
+  "ReferenceList": ["hg38"],
+  "AlignOrderList": [
+    "hg38",
+    "mPanTro3",
+    "mPanPan1",
+    "mGorGor1",
+    "mPonAbe1",
+    "mPonPyg2",
+    "mSymSyn1",
+    "MFA8",
+    "calJac240"
+  ]
+}
