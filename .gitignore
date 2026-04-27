@@ -11,3 +11,5 @@ venv/
 *.swp
 .coverage
 htmlcov/
+.RData
+.Rhistory
