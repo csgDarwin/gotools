@@ -1,21 +1,40 @@
 #!/usr/bin/env python3
-"""
-go2fix: Identifies conserved positions in DNA multiple sequence alignments.
+"""go2fix: identify conserved positions in DNA multiple sequence alignments.
 
--o / --output takes a FULL output path (directory + filename). Parent
-directories are created automatically.
+The CLI reads a MAF alignment, finds positions where at least ``--max-conserved``
+rows agree on the same non-N, non-gap base relative to the first (reference)
+sequence, and writes a BED file of those positions (merged into intervals by
+default).
+
+The ``-o``/``--output`` option takes a full output path (directory + filename);
+parent directories are created automatically.
 """
 
 import argparse
 import gzip
-import sys
+import logging
 import multiprocessing as mp
-from pathlib import Path
-from typing import List, Tuple, Optional, Iterator, Dict, Iterable
-import time
-import threading
 import queue
+import sys
+import threading
+import time
+from pathlib import Path
+from typing import Dict, Iterable, Iterator, List, Optional, Tuple
+
 import numpy as np
+
+__all__ = [
+    "parse_maf_blocks",
+    "find_conserved_vectorized",
+    "process_block",
+    "writer_thread_fast",
+    "default_output_filename",
+    "go2fix_optimized",
+    "go2fix_single",
+    "main",
+]
+
+logger = logging.getLogger(__name__)
 
 _UPPER_TABLE = np.zeros(256, dtype=np.uint8)
 for _i in range(256):
@@ -28,7 +47,15 @@ _ERR = "__ERROR__"
 
 
 def parse_maf_blocks(file_handle) -> Iterator[Tuple[str, int, List[bytes]]]:
-    """Fast custom MAF parser that yields alignment blocks."""
+    """Yield ``(ref_id, ref_start, sequences)`` tuples for each MAF block.
+
+    Args:
+        file_handle: Iterable of MAF lines (text or bytes).
+
+    Yields:
+        Tuples of the reference (first) sequence identifier, its 0-based start
+        position, and the list of aligned sequence bytes for the block.
+    """
     current_sequences: List[bytes] = []
     ref_id = ""
     ref_start = 0
@@ -64,7 +91,19 @@ def parse_maf_blocks(file_handle) -> Iterator[Tuple[str, int, List[bytes]]]:
 
 
 def find_conserved_vectorized(sequences: List[bytes], max_conserved: int) -> np.ndarray:
-    """Find conserved positions using vectorized NumPy operations."""
+    """Return a boolean mask of conserved alignment columns.
+
+    A column is conserved when every row matches the reference (row 0) base,
+    no row contains an ``N``, and the reference base is not a gap. Returns an
+    empty array if there are fewer than ``max_conserved`` rows or no input.
+
+    Args:
+        sequences: Aligned rows as ASCII byte strings (all the same length).
+        max_conserved: Minimum number of rows required for a conserved call.
+
+    Returns:
+        A 1-D boolean ``ndarray`` of length ``len(sequences[0])``.
+    """
     n_seqs = len(sequences)
     if n_seqs < max_conserved or not sequences:
         return np.array([], dtype=bool)
@@ -82,13 +121,15 @@ def find_conserved_vectorized(sequences: List[bytes], max_conserved: int) -> np.
 
 
 def process_block(block_data: Tuple) -> Tuple[int, List[Tuple]]:
-    """Process a single block. (#3) Returns tuples, not formatted strings.
+    """Process a single MAF block into BED tuples.
 
     Args:
-        block_data: (block_index, ref_id, ref_start, sequences, max_conserved, verbose)
+        block_data: ``(block_index, ref_id, ref_start, sequences, max_conserved, verbose)``.
 
     Returns:
-        (block_index, list_of_(chrom, start, end, base_or_None))
+        ``(block_index, [(chrom, start, end, base_or_None), ...])``. On
+        per-block failure the second element is a single error tuple keyed by
+        ``_ERR`` so the writer can skip it.
     """
     block_index, ref_id, ref_start, sequences, max_conserved, verbose = block_data
     try:
@@ -131,7 +172,7 @@ def _block_generator(
     max_conserved: int,
     verbose: bool,
 ) -> Iterator[Tuple]:
-    """Feed individual block tuples to the pool (one block per task)."""
+    """Yield per-block work units for the worker pool."""
     block_index = 0
     for ref_id, ref_start, sequences in parser_iter:
         if not sequences:
@@ -146,7 +187,12 @@ def writer_thread_fast(
     merge_output: bool,
     verbose: bool,
 ) -> None:
-    """(#3) Writer consumes tuples directly. Reorders via result_buffer."""
+    """Drain ``write_queue`` of per-block result tuples and write a BED file.
+
+    Tuples arrive out of order from ``imap_unordered``; results are buffered
+    and emitted in original block order. Merging adjacent positions on the
+    same chromosome is enabled by ``merge_output``.
+    """
     result_buffer: Dict[int, List[Tuple]] = {}
     next_expected = 0
 
@@ -229,12 +275,13 @@ def writer_thread_fast(
                 if write_buffer:
                     outfile.writelines(write_buffer)
 
-    except Exception as e:
-        print(f"Fatal error in writer thread: {e}", file=sys.stderr)
+    except Exception:
+        logger.exception("Fatal error in writer thread")
         raise
 
 
 def default_output_filename(in_file: str, output_dir: str = "fixed_sites/") -> str:
+    """Build a default ``<dir>/<basename>_conserved.bed`` path from an input MAF."""
     base = Path(in_file).name
     if base.endswith('.maf.gz'):
         base = base[:-7]
@@ -261,7 +308,26 @@ def go2fix_optimized(
     out_filename: Optional[str] = None,
     default_output_dir: str = "fixed_sites/",
 ) -> None:
-    """Process a MAF alignment with pipelined parallelism (#1+#2+#3)."""
+    """Multiprocess pipeline: parser → workers → writer.
+
+    Args:
+        in_filename: Path to MAF or MAF.gz file.
+        max_conserved: Minimum number of rows that must agree for a position
+            to be called conserved.
+        num_workers: Worker process count. Defaults to ``min(8, CPU - 1)``.
+        chunksize: ``imap_unordered`` chunk size (blocks per dispatch).
+        verbose: If True, the BED output includes the conserved base in a
+            fourth column.
+        merge_output: Merge adjacent conserved positions on the same chromosome.
+        out_filename: Full output path. If None, derived from ``in_filename``
+            and ``default_output_dir``.
+        default_output_dir: Directory used when ``out_filename`` is None.
+
+    Raises:
+        FileNotFoundError: If the input file does not exist.
+        ValueError: If ``max_conserved`` is less than 1.
+        IOError: If the pipeline fails during processing.
+    """
     max_conserved = int(max_conserved)
     if max_conserved < 1:
         raise ValueError(f"max_conserved must be >= 1, got {max_conserved}")
@@ -279,17 +345,17 @@ def go2fix_optimized(
     if num_workers is None:
         num_workers = min(8, max(1, mp.cpu_count() - 1))
 
-    print(f"=== Go2Fix Optimized v2 (pipelined, tuple-IO) ===", file=sys.stderr)
-    print(f"Input: {in_filename}", file=sys.stderr)
-    print(f"Workers: {num_workers}", file=sys.stderr)
-    print(f"imap_unordered chunksize: {chunksize}", file=sys.stderr)
-    print(f"Min rows (max_conserved): {max_conserved}", file=sys.stderr)
-    print(f"Merge output: {merge_output}", file=sys.stderr)
-    print(f"Output: {out_filename}", file=sys.stderr)
+    logger.info("=== Go2Fix Optimized v2 (pipelined, tuple-IO) ===")
+    logger.info("Input: %s", in_filename)
+    logger.info("Workers: %d", num_workers)
+    logger.info("imap_unordered chunksize: %d", chunksize)
+    logger.info("Min rows (max_conserved): %d", max_conserved)
+    logger.info("Merge output: %s", merge_output)
+    logger.info("Output: %s", out_filename)
 
     start_time = time.time()
 
-    write_queue: "queue.Queue" = queue.Queue(maxsize=num_workers * 8)
+    write_queue: queue.Queue = queue.Queue(maxsize=num_workers * 8)
 
     writer = threading.Thread(
         target=writer_thread_fast,
@@ -311,26 +377,26 @@ def go2fix_optimized(
                 write_queue.put(result)
                 blocks_done += 1
                 if blocks_done % 10000 == 0:
-                    print(f"Processed {blocks_done} blocks...", file=sys.stderr)
+                    logger.info("Processed %d blocks...", blocks_done)
 
         write_queue.put(None)
         write_queue.join()
         writer.join()
 
         elapsed = time.time() - start_time
-        print(f"\n=== Complete ===", file=sys.stderr)
-        print(f"Total blocks: {blocks_done}", file=sys.stderr)
-        print(f"Time: {elapsed:.2f} seconds", file=sys.stderr)
+        logger.info("=== Complete ===")
+        logger.info("Total blocks: %d", blocks_done)
+        logger.info("Time: %.2f seconds", elapsed)
         if elapsed > 0:
-            print(f"Speed: {blocks_done / elapsed:.1f} blocks/sec", file=sys.stderr)
-        print(f"Output: {out_filename}", file=sys.stderr)
+            logger.info("Speed: %.1f blocks/sec", blocks_done / elapsed)
+        logger.info("Output: %s", out_filename)
 
     except Exception as e:
         try:
             write_queue.put(None)
         except Exception:
-            pass
-        raise IOError(f"Error processing file: {e}") from e
+            logger.debug("Failed to enqueue sentinel during error cleanup", exc_info=True)
+        raise OSError(f"Error processing file: {e}") from e
 
 
 def go2fix_single(
@@ -341,7 +407,12 @@ def go2fix_single(
     out_filename: Optional[str] = None,
     default_output_dir: str = "fixed_sites/",
 ) -> None:
-    """Single-threaded reference path (tuple-based, #2 + #3 applied)."""
+    """Single-threaded reference implementation (matches the multiprocess output).
+
+    Useful for debugging, small inputs, and environments where ``multiprocessing``
+    is unavailable. Same semantics as :func:`go2fix_optimized` minus the worker
+    pool and ``num_workers``/``chunksize`` parameters.
+    """
     max_conserved = int(max_conserved)
     if max_conserved < 1:
         raise ValueError(f"max_conserved must be >= 1, got {max_conserved}")
@@ -356,7 +427,7 @@ def go2fix_single(
         out_filename = default_output_filename(in_filename, default_output_dir)
     _ensure_parent_dir(out_filename)
 
-    print(f"=== Go2Fix (single-threaded) ===", file=sys.stderr)
+    logger.info("=== Go2Fix (single-threaded) ===")
     start_time = time.time()
 
     file_opener = gzip.open if is_gzipped else open
@@ -375,7 +446,7 @@ def go2fix_single(
                 continue
             block_count += 1
             if block_count % 5000 == 0:
-                print(f"Processed {block_count} blocks...", file=sys.stderr)
+                logger.info("Processed %d blocks...", block_count)
 
             _, bed_tuples = process_block(
                 (0, ref_id, ref_start, sequences, max_conserved, verbose)
@@ -407,13 +478,14 @@ def go2fix_single(
             outfile.write(f"{cur_chrom}\t{cur_start}\t{cur_end}\n")
 
     elapsed = time.time() - start_time
-    print(f"\n=== Complete ===", file=sys.stderr)
-    print(f"Total blocks: {block_count}", file=sys.stderr)
-    print(f"Time: {elapsed:.2f} seconds", file=sys.stderr)
-    print(f"Output: {out_filename}", file=sys.stderr)
+    logger.info("=== Complete ===")
+    logger.info("Total blocks: %d", block_count)
+    logger.info("Time: %.2f seconds", elapsed)
+    logger.info("Output: %s", out_filename)
 
 
 def main():
+    """Console-script entry point for ``go2fix``."""
     parser = argparse.ArgumentParser(
         description="Go2Fix v2 - pipelined + tuple-IO (explicit output filename)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -422,9 +494,9 @@ def main():
 Parent directories are created automatically.
 
 Examples:
-  python go2fix.py alignment.maf.gz -o out/mybed.bed
-  python go2fix.py alignment.maf -o results/run1/conserved.bed --workers 16 -m 200
-  python go2fix.py alignment.maf
+  go2fix alignment.maf.gz -o out/mybed.bed
+  go2fix alignment.maf -o results/run1/conserved.bed --workers 16 -m 200
+  go2fix alignment.maf
   # Output (no -o): fixed_sites/alignment_conserved.bed
         """,
     )
@@ -475,8 +547,21 @@ Examples:
         default=False,
         help="Include base identity in output (adds 4th column)",
     )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        default=False,
+        help="Suppress informational progress messages on stderr.",
+    )
 
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.WARNING if args.quiet else logging.INFO,
+        format="%(message)s",
+        stream=sys.stderr,
+        force=True,
+    )
 
     try:
         merge = not args.no_merge
@@ -500,11 +585,11 @@ Examples:
                 out_filename=args.output_file,
             )
 
-    except (FileNotFoundError, ValueError, IOError) as e:
-        print(f"Error: {e}", file=sys.stderr)
+    except (OSError, FileNotFoundError, ValueError) as e:
+        logger.error("Error: %s", e)
         sys.exit(1)
     except Exception as e:
-        print(f"Unexpected error: {e}", file=sys.stderr)
+        logger.error("Unexpected error: %s", e)
         sys.exit(1)
 
 

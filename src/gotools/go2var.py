@@ -1,32 +1,49 @@
 #!/usr/bin/env python3
-"""
-go2var: Optimized integrated Sort + Variant calling pipeline.
+"""go2var: integrated sort + variant-calling pipeline for MAF alignments.
 
--o / --output takes a FULL output path (directory + filename). Parent
-directories are created automatically.
+Combines a custom MAF parser with NumPy-vectorized variant detection and
+species filtering/reordering inside a single multiprocess pipeline.
 
-Combines custom MAF parsing with NumPy vectorized variant detection
-and species filtering/reordering - all in a single multiprocessed pipeline.
-
+The CLI takes a MAF (optionally gzip-compressed) and a JSON config that lists
+``ReferenceList`` (the species whose agreement defines a callable position) and
+``AlignOrderList`` (the species ordering used downstream). Output is a BED file
+of variant positions where the reference species agree and no non-reference
+species shares the reference base.
 """
 
 import argparse
 import gzip
 import json
-import sys
-import time
-import threading
-import queue
+import logging
 import multiprocessing as mp
-from pathlib import Path
-from typing import List, Tuple, Optional, Dict, Iterator
+import queue
+import sys
+import threading
+import time
 from functools import partial
+from pathlib import Path
+from typing import Dict, Iterator, List, Optional, Tuple
+
 import numpy as np
+
+__all__ = [
+    "read_json_lists",
+    "parse_maf_block_custom",
+    "read_maf_blocks_fast",
+    "find_variants_numpy",
+    "process_block_optimized",
+    "writer_thread_optimized",
+    "default_output_filename",
+    "go2var_sorted_optimized",
+    "main",
+]
+
+logger = logging.getLogger(__name__)
 
 # Pre-compute uppercase ASCII mapping table
 _UPPER_TABLE = np.zeros(256, dtype=np.uint8)
-for i in range(256):
-    _UPPER_TABLE[i] = ord(chr(i).upper()) if i < 128 else i
+for _i in range(256):
+    _UPPER_TABLE[_i] = ord(chr(_i).upper()) if _i < 128 else _i
 
 _GAP = ord('-')
 
@@ -36,8 +53,19 @@ _GAP = ord('-')
 # =============================================================================
 
 def read_json_lists(json_file: str) -> Tuple[List[str], List[str], int]:
-    """Read reference and alignment order lists from JSON config."""
-    with open(json_file, 'r') as f:
+    """Load reference and alignment-order species lists from a JSON config.
+
+    Args:
+        json_file: Path to a JSON file with ``ReferenceList`` and
+            ``AlignOrderList`` keys.
+
+    Returns:
+        ``(reference_list, align_list, len(reference_list))``.
+
+    Raises:
+        ValueError: If either list is missing or empty.
+    """
+    with open(json_file) as f:
         data = json.load(f)
 
     reference_list = data.get("ReferenceList", [])
@@ -55,13 +83,18 @@ def read_json_lists(json_file: str) -> Tuple[List[str], List[str], int]:
 # Custom MAF Parser (No BioPython)
 # =============================================================================
 
-def parse_maf_block_custom(block_lines: List[str]) -> Optional[Tuple[Dict[str, Tuple[str, int, bytes]], str]]:
-    """
-    Parse a single MAF block into species -> (id, start, sequence) dictionary.
+def parse_maf_block_custom(
+    block_lines: List[str],
+) -> Optional[Tuple[Dict[str, Tuple[str, int, bytes]], str]]:
+    """Parse one MAF block into a per-species dictionary.
+
+    Args:
+        block_lines: Lines belonging to a single ``a``-block.
 
     Returns:
-        Tuple of (species_dict, first_species) or None if invalid
-        species_dict maps species_name -> (full_id, start_position, sequence_bytes)
+        ``(species_dict, first_species)`` where ``species_dict`` maps
+        ``species_name`` to ``(full_id, start_position, sequence_bytes)``,
+        or ``None`` if the block is empty or contains a duplicate species.
     """
     species_dict: Dict[str, Tuple[str, int, bytes]] = {}
     first_species = None
@@ -86,7 +119,7 @@ def parse_maf_block_custom(block_lines: List[str]) -> Optional[Tuple[Dict[str, T
         else:
             species = src
 
-        # Check for duplicate species
+        # Reject blocks where the same species appears twice.
         if species in species_dict:
             return None
 
@@ -101,9 +134,18 @@ def parse_maf_block_custom(block_lines: List[str]) -> Optional[Tuple[Dict[str, T
     return species_dict, first_species
 
 
-def read_maf_blocks_fast(filepath: str, block_size: int = 500) -> Iterator[List[Tuple[int, List[str]]]]:
-    """
-    Fast MAF block reader that yields batches of (index, block_lines) tuples.
+def read_maf_blocks_fast(
+    filepath: str, block_size: int = 500
+) -> Iterator[List[Tuple[int, List[str]]]]:
+    """Stream MAF blocks in batches of ``(global_index, block_lines)``.
+
+    Args:
+        filepath: Path to a MAF or MAF.gz file.
+        block_size: Number of blocks per yielded batch.
+
+    Yields:
+        Lists of ``(block_index, block_lines)`` tuples sized up to
+        ``block_size``. The final batch may be smaller.
     """
     is_gzipped = filepath.endswith('.gz')
     file_opener = gzip.open if is_gzipped else open
@@ -152,10 +194,21 @@ def read_maf_blocks_fast(filepath: str, block_size: int = 500) -> Iterator[List[
 # =============================================================================
 
 def find_variants_numpy(sequences: List[bytes], r_num: int, skip_gaps: bool) -> np.ndarray:
-    """
-    Find variant positions using vectorized NumPy operations.
+    """Return a boolean mask of variant alignment columns.
 
-    Returns boolean array where True = variant position.
+    A variant column is one where the first ``r_num`` reference rows all agree
+    on a base, none of the remaining (non-reference) rows shares that base,
+    and the reference base is not a gap (when ``skip_gaps`` is ``True``).
+
+    Args:
+        sequences: Aligned rows as ASCII byte strings, all the same length.
+            Rows ``0..r_num-1`` are reference; the rest are non-reference.
+        r_num: Number of reference rows.
+        skip_gaps: If ``True``, columns where the reference is a gap are
+            excluded.
+
+    Returns:
+        A 1-D boolean ``ndarray`` of length ``len(sequences[0])``.
     """
     if len(sequences) < r_num or not sequences:
         return np.array([], dtype=bool)
@@ -204,12 +257,14 @@ def process_block_optimized(
     align_order: List[str],
     ref_threshold: int,
     skip_gaps: bool,
-    verbose: bool
+    verbose: bool,
 ) -> Tuple[int, Optional[List[str]]]:
-    """
-    Optimized integrated processing: Parse, Filter, Reorder, Detect variants.
+    """Parse, filter, reorder, and call variants for one MAF block.
 
-    All done with custom parsing and NumPy - no BioPython.
+    Returns a tuple of ``(block_index, lines)``. ``lines`` is ``None`` for
+    blocks that fail the reference-species threshold, an empty list for
+    blocks that pass the threshold but contain no variants, and a list of
+    BED-formatted strings otherwise.
     """
     block_index, block_lines = indexed_block
     r_num = ref_threshold
@@ -233,7 +288,7 @@ def process_block_optimized(
     ref_start = 0
     ref_id = ""
 
-    for i, species in enumerate(align_order):
+    for species in align_order:
         if species in species_dict:
             full_id, start, seq_bytes = species_dict[species]
 
@@ -305,13 +360,20 @@ def process_block_optimized(
 # Writer Thread
 # =============================================================================
 
-def writer_thread_optimized(out_filename: str, write_queue: queue.Queue, merge_output: bool = False) -> None:
-    """Optimized writer thread with large buffers and batch writes."""
+def writer_thread_optimized(
+    out_filename: str, write_queue: queue.Queue, merge_output: bool = False
+) -> None:
+    """Drain ``write_queue`` of per-block result lines and write a BED file.
+
+    Lines arrive out of order; results are buffered and emitted in original
+    block order. Adjacent positions on the same chromosome are merged when
+    ``merge_output`` is ``True``.
+    """
     result_buffer: Dict[int, List[str]] = {}
     next_expected = 0
 
     try:
-        with open(out_filename, "w", buffering=8*1024*1024) as outfile:  # 8MB buffer
+        with open(out_filename, "w", buffering=8 * 1024 * 1024) as outfile:  # 8MB buffer
             if merge_output:
                 current_chrom = None
                 current_start = None
@@ -343,7 +405,9 @@ def writer_thread_optimized(out_filename: str, write_queue: queue.Queue, merge_o
                                 current_end = end
                             else:
                                 if current_chrom is not None:
-                                    outfile.write(f"{current_chrom}\t{current_start}\t{current_end}\n")
+                                    outfile.write(
+                                        f"{current_chrom}\t{current_start}\t{current_end}\n"
+                                    )
                                 current_chrom = chrom
                                 current_start = start
                                 current_end = end
@@ -366,7 +430,9 @@ def writer_thread_optimized(out_filename: str, write_queue: queue.Queue, merge_o
                             current_end = end
                         else:
                             if current_chrom is not None:
-                                outfile.write(f"{current_chrom}\t{current_start}\t{current_end}\n")
+                                outfile.write(
+                                    f"{current_chrom}\t{current_start}\t{current_end}\n"
+                                )
                             current_chrom, current_start, current_end = chrom, start, end
                     next_expected += 1
 
@@ -391,7 +457,7 @@ def writer_thread_optimized(out_filename: str, write_queue: queue.Queue, merge_o
                     while next_expected in result_buffer:
                         lines = result_buffer.pop(next_expected)
                         write_buffer.extend(lines)
-                        buffer_bytes += sum(len(l) for l in lines)
+                        buffer_bytes += sum(len(line) for line in lines)
                         next_expected += 1
 
                         if buffer_bytes >= max_buffer:
@@ -409,8 +475,8 @@ def writer_thread_optimized(out_filename: str, write_queue: queue.Queue, merge_o
                 if write_buffer:
                     outfile.writelines(write_buffer)
 
-    except Exception as e:
-        print(f"Fatal error in writer: {e}", file=sys.stderr)
+    except Exception:
+        logger.exception("Fatal error in writer")
         raise
 
 
@@ -419,10 +485,7 @@ def writer_thread_optimized(out_filename: str, write_queue: queue.Queue, merge_o
 # =============================================================================
 
 def default_output_filename(in_file: str) -> str:
-    """Generate default output filename from input file.
-
-    Removes .maf.gz or .maf extension and adds .bed
-    """
+    """Replace a ``.maf``/``.maf.gz`` suffix on ``in_file`` with ``.bed``."""
     base = in_file
     if base.endswith('.maf.gz'):
         base = base[:-7]
@@ -436,17 +499,29 @@ def default_output_filename(in_file: str) -> str:
 def go2var_sorted_optimized(
     in_file: str,
     json_file: str,
-    out_file: str = None,
+    out_file: Optional[str] = None,
     skip_gaps: bool = True,
-    num_workers: int = None,
+    num_workers: Optional[int] = None,
     block_size: int = 500,
     verbose: bool = False,
-    merge_output: bool = False
+    merge_output: bool = False,
 ) -> None:
-    """
-    Highly optimized integrated Go2Sort + Go2Var pipeline.
+    """Run the integrated sort + variant pipeline end-to-end.
 
-    Uses custom MAF parsing and NumPy vectorized operations.
+    Args:
+        in_file: Input MAF or MAF.gz path.
+        json_file: JSON config with ``ReferenceList`` and ``AlignOrderList``.
+        out_file: Output BED path. Defaults to ``<input-basename>.bed``.
+        skip_gaps: Exclude columns where the reference base is a gap.
+        num_workers: Worker process count. Defaults to ``min(8, CPU - 1)``.
+        block_size: Number of MAF blocks per worker batch.
+        verbose: Append substitution detail and column to each output line.
+        merge_output: Merge adjacent variant positions on the same chromosome.
+
+    Raises:
+        FileNotFoundError: If ``in_file`` does not exist.
+        ValueError: If the JSON config is malformed.
+        IOError: If the pipeline fails during processing.
     """
     if num_workers is None:
         num_workers = min(8, max(1, mp.cpu_count() - 1))
@@ -458,7 +533,7 @@ def go2var_sorted_optimized(
     # Ensure output directory exists (creates parents as needed)
     out_path = Path(out_file)
     if out_path.parent and not out_path.parent.exists():
-        print(f"Creating output directory: {out_path.parent}", file=sys.stderr)
+        logger.info("Creating output directory: %s", out_path.parent)
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Read config
@@ -476,16 +551,16 @@ def go2var_sorted_optimized(
         align_order=align_order,
         ref_threshold=ref_threshold,
         skip_gaps=skip_gaps,
-        verbose=verbose
+        verbose=verbose,
     )
 
-    print(f"=== Go2Var ===", file=sys.stderr)
-    print(f"Input: {in_file}", file=sys.stderr)
-    print(f"Output: {out_file}", file=sys.stderr)
-    print(f"Workers: {num_workers}", file=sys.stderr)
-    print(f"Block size: {block_size}", file=sys.stderr)
-    print(f"Reference species: {len(primate_list)} (r_num={ref_threshold})", file=sys.stderr)
-    print(f"Merge output: {merge_output}", file=sys.stderr)
+    logger.info("=== Go2Var ===")
+    logger.info("Input: %s", in_file)
+    logger.info("Output: %s", out_file)
+    logger.info("Workers: %d", num_workers)
+    logger.info("Block size: %d", block_size)
+    logger.info("Reference species: %d (r_num=%d)", len(primate_list), ref_threshold)
+    logger.info("Merge output: %s", merge_output)
 
     start_time = time.time()
 
@@ -496,7 +571,7 @@ def go2var_sorted_optimized(
     writer = threading.Thread(
         target=writer_thread_optimized,
         args=(out_file, write_queue, merge_output),
-        daemon=False
+        daemon=False,
     )
     writer.start()
 
@@ -520,9 +595,10 @@ def go2var_sorted_optimized(
                 if blocks_processed % 10000 == 0:
                     elapsed = time.time() - start_time
                     rate = blocks_processed / elapsed if elapsed > 0 else 0
-                    print(f"Processed {blocks_processed} blocks, "
-                          f"{blocks_passed} with variants "
-                          f"({rate:.0f} blocks/sec)...", file=sys.stderr)
+                    logger.info(
+                        "Processed %d blocks, %d with variants (%.0f blocks/sec)...",
+                        blocks_processed, blocks_passed, rate,
+                    )
 
         # Signal completion
         write_queue.put((None, None))
@@ -530,43 +606,37 @@ def go2var_sorted_optimized(
         writer.join()
 
         elapsed = time.time() - start_time
-        print(f"\n=== Complete ===", file=sys.stderr)
-        print(f"Total blocks: {blocks_processed}", file=sys.stderr)
-        print(f"Blocks with variants: {blocks_passed}", file=sys.stderr)
-        print(f"Time: {elapsed:.2f} seconds", file=sys.stderr)
-        print(f"Speed: {blocks_processed / elapsed:.0f} blocks/sec", file=sys.stderr)
-        print(f"Output: {out_file}", file=sys.stderr)
+        logger.info("=== Complete ===")
+        logger.info("Total blocks: %d", blocks_processed)
+        logger.info("Blocks with variants: %d", blocks_passed)
+        logger.info("Time: %.2f seconds", elapsed)
+        if elapsed > 0:
+            logger.info("Speed: %.0f blocks/sec", blocks_processed / elapsed)
+        logger.info("Output: %s", out_file)
 
     except Exception as e:
         try:
             write_queue.put((None, None))
-        except:
-            pass
-        raise IOError(f"Error: {e}") from e
+        except Exception:
+            logger.debug("Failed to enqueue sentinel during error cleanup", exc_info=True)
+        raise OSError(f"Error: {e}") from e
 
 
 def main():
-    """Console script entry point."""
+    """Console-script entry point for ``go2var``."""
     parser = argparse.ArgumentParser(
         description="Go2Var: High-performance integrated Sort + Variant pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Performance improvements over v4:
-  - Custom MAF parser 
-  - NumPy vectorized variant detection - processes entire blocks at once
-  - Byte-level sequence operations
-  - Larger I/O buffers (8-16MB)
-  - Maintains all filtering/reordering logic
-
 Examples:
-  python go2var.py input.maf config.json
+  go2var input.maf config.json
   # Output: input.bed
 
-  python go2var.py input.maf.gz config.json -w 8 --merge
+  go2var input.maf.gz config.json -w 8 --merge
   # Output: input.bed
 
-  python go2var.py input.maf config.json custom_output.bed
-        """
+  go2var input.maf config.json custom_output.bed
+        """,
     )
     parser.add_argument("input_file", type=str, help="Input MAF file")
     parser.add_argument("json_file", type=str, help="JSON config file")
@@ -582,8 +652,17 @@ Examples:
                         help="Include substitution details")
     parser.add_argument("--merge", action="store_true", default=False,
                         help="Merge consecutive positions")
+    parser.add_argument("--quiet", action="store_true", default=False,
+                        help="Suppress informational progress messages on stderr.")
 
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.WARNING if args.quiet else logging.INFO,
+        format="%(message)s",
+        stream=sys.stderr,
+        force=True,
+    )
 
     try:
         go2var_sorted_optimized(
@@ -594,13 +673,13 @@ Examples:
             num_workers=args.workers,
             block_size=args.block_size,
             verbose=args.verbose,
-            merge_output=args.merge
+            merge_output=args.merge,
         )
-    except (FileNotFoundError, ValueError, json.JSONDecodeError, IOError) as e:
-        print(f"Error: {e}", file=sys.stderr)
+    except (OSError, FileNotFoundError, ValueError, json.JSONDecodeError) as e:
+        logger.error("Error: %s", e)
         sys.exit(1)
     except Exception as e:
-        print(f"Unexpected error: {e}", file=sys.stderr)
+        logger.error("Unexpected error: %s", e)
         sys.exit(1)
 
 

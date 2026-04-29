@@ -1,17 +1,37 @@
 [project]
 name = "gotools"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Fast conserved-site and variant detection from MAF multiple sequence alignments"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "csgDarwin", email = "csg2darwin@gmail.com" }]
 requires-python = ">=3.8"
 dependencies = ["numpy>=1.20"]
+keywords = [
+    "bioinformatics",
+    "MAF",
+    "multiple-sequence-alignment",
+    "conserved-sites",
+    "variant-calling",
+    "comparative-genomics",
+]
 classifiers = [
-    "Programming Language :: Python :: 3",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+    "ruff>=0.4",
 ]
 
 [project.scripts]
@@ -21,7 +41,33 @@ go2var = "gotools.go2var:main"
 [project.urls]
 Repository = "https://github.com/csgDarwin/gotools"
 Issues     = "https://github.com/csgDarwin/gotools/issues"
+Changelog  = "https://github.com/csgDarwin/gotools/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/gotools/__init__.py"
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
+exclude = ["manuscript/"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by formatter when used)
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
