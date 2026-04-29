@@ -4,8 +4,8 @@ Fast conserved-site and variant detection from MAF multiple sequence alignments.
 
 `gotools` provides two command-line tools:
 
-- **`go2fix`** — scans a MAF alignment for conserved positions (identical base across ≥ N rows, no Ns, no gaps) and emits a BED file of conserved intervals.
-- **`go2var`** — scans a MAF alignment for positions where non-reference species diverge from the reference, using a JSON config to define species threshold and ordering, and emits a BED file of variant intervals.
+- **`go2fix`** — scans a MAF alignment for conserved positions (identical base across ≥ N rows, no Ns, no gaps) and outputs a BED file of conserved intervals.
+- **`go2var`** — scans a MAF alignment for positions where non-reference species diverge from the reference, using a JSON config to define species threshold and ordering, and outputs a BED file of variant intervals.
 
 ---
 
