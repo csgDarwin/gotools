@@ -20,37 +20,47 @@ This directory contains a small runnable demo for both `gotools` commands.
 |---|---|
 | `small.maf` | 2-block, 9-species MAF fixture (hg38 reference; chimp, bonobo, gorilla, orangutan, gibbon, macaque, marmoset) |
 | `small_config.json` | `go2var` config naming `hg38` as the reference species and listing the full species order |
+| `small.expected.bed` | Reference `go2var` output for `small.maf` (141 variant positions, basic `-w 1` invocation); `diff` against your run to verify the install |
+| `hprc.example.maf` | 1-block, 464-haplotype MAF from the HPRC pangenome (GRCh38 chr10 reference, real HPRCv2 alignment) |
+| `hprc.example.expected.bed` | Reference `go2fix` output for `hprc.example.maf` (22 merged conserved intervals); `diff` against your run to verify the install |
 
 ## `go2fix` — find conserved positions
 
-From this `examples/` directory:
+### HPRC pangenome demo (464 haplotypes)
+
+This example uses a single alignment block from a real HPRCv2 chr10 alignment with all
+464 haplotypes present — the scale and `-m` threshold used in production pangenome analysis.
 
 ```bash
-# Require at least 2 matching rows per position; single-threaded for deterministic output.
-go2fix small.maf -m 2 -o demo_conserved.bed --single-threaded
-
-head demo_conserved.bed
-wc -l demo_conserved.bed
+go2fix hprc.example.maf -m 464 -o hprc.example.out.bed
 ```
 
-**Expected output:** 30 merged BED intervals. First lines:
+**Expected output:** 22 merged conserved intervals. First lines:
 
 ```
-hg38.chr1	10464	10471
-hg38.chr1	10472	10474
-hg38.chr1	10475	10478
+GRCh38.chr10	611096	611175
+GRCh38.chr10	611176	611201
+GRCh38.chr10	611203	611275
+GRCh38.chr10	611276	611328
+GRCh38.chr10	611329	611415
 ```
 
 **Expected run time:** < 1 second on a standard laptop.
+
+To verify your install reproduces the documented output exactly:
+
+```bash
+diff hprc.example.out.bed hprc.example.expected.bed   # should print nothing
+```
 
 ### Other `go2fix` options to try
 
 ```bash
 # Default parallel run (uses multiple workers).
-go2fix small.maf -m 2 -o demo_conserved.bed --workers 4
+go2fix hprc.example.maf -m 464 -o demo_conserved.bed --workers 4
 
 # Disable adjacent-position merging (emit one record per position).
-go2fix small.maf -m 2 -o demo_conserved_unmerged.bed --single-threaded --no-merge
+go2fix hprc.example.maf -m 464 -o demo_conserved_unmerged.bed --single-threaded --no-merge
 ```
 
 ## `go2var` — find variant positions
@@ -74,6 +84,12 @@ hg38.chr1	10438	10439
 ```
 
 **Expected run time:** < 1 second on a standard laptop.
+
+To verify your install reproduces the documented output exactly:
+
+```bash
+diff demo_variants.bed small.expected.bed             # should print nothing
+```
 
 ### Other `go2var` options to try
 
