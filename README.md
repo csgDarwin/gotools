@@ -5,7 +5,7 @@ Fast conserved-site and variant detection from MAF multiple sequence alignments.
 `gotools` provides two command-line tools:
 
 - **`go2fix`** — scans a MAF alignment for conserved positions (identical base across ≥ N rows, no Ns, no gaps) and outputs a BED file of conserved intervals.
-- **`go2var`** — scans a MAF alignment for positions where non-reference species diverge from the reference, using a JSON config to define species threshold and ordering, and outputs a BED file of variant intervals.
+- **`go2var`** — scans a MAF alignment for positions where non-reference species diverge from the reference (skipping reference `N` and gap positions), using a JSON config to define species threshold and ordering, and outputs a BED file of variant intervals.
 
 ---
 
@@ -22,7 +22,7 @@ Fast conserved-site and variant detection from MAF multiple sequence alignments.
 ### Option 1 — install directly from GitHub (recommended)
 
 ```bash
-pip install git+https://github.com/csgDarwin/gotools.git@v0.1.0
+pip install git+https://github.com/csgDarwin/gotools.git@main
 ```
 
 After install, the commands `go2fix` and `go2var` are on your PATH.
@@ -49,7 +49,7 @@ go2fix input.maf.gz -m 464 -o output_dir/ --workers 8
 - `-m / --max-conserved` — minimum number of rows that must match (default 464)
 - `-o / --output` — output path (directory or full filename)
 - `--workers` — number of worker processes
-- `--no-merge` — emit one record per position instead of merging adjacent conserved bases
+- `--no-merge` — writes one record per position instead of merging adjacent conserved bases
 
 See `go2fix --help` for full options.
 

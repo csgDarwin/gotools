@@ -9,6 +9,10 @@ The CLI takes a MAF (optionally gzip-compressed) and a JSON config that lists
 ``AlignOrderList`` (the species ordering used downstream). Output is a BED file
 of variant positions where the reference species agree and no non-reference
 species shares the reference base.
+
+Reference positions where the first genome base is ``N`` are unconditionally
+skipped (uninformative reference). Reference gap positions are skipped by
+default and can be retained with ``--include-gaps``.
 """
 
 import argparse
@@ -46,6 +50,7 @@ for _i in range(256):
     _UPPER_TABLE[_i] = ord(chr(_i).upper()) if _i < 128 else _i
 
 _GAP = ord('-')
+_N_UPPER = ord('N')
 
 
 # =============================================================================
@@ -198,7 +203,11 @@ def find_variants_numpy(sequences: List[bytes], r_num: int, skip_gaps: bool) -> 
 
     A variant column is one where the first ``r_num`` reference rows all agree
     on a base, none of the remaining (non-reference) rows shares that base,
-    and the reference base is not a gap (when ``skip_gaps`` is ``True``).
+    the reference base is not ``N``, and the reference base is not a gap (when
+    ``skip_gaps`` is ``True``).
+
+    The ``N`` filter is unconditional: an ``N`` reference base is uninformative
+    regardless of gap policy and is always excluded.
 
     Args:
         sequences: Aligned rows as ASCII byte strings, all the same length.
@@ -229,9 +238,13 @@ def find_variants_numpy(sequences: List[bytes], r_num: int, skip_gaps: bool) -> 
     # Check reference consensus (all refs must match first ref)
     ref_consensus = np.all(ref_seqs == ref_base, axis=0)
 
-    # Handle gaps
+    # Validity: never call variants where the reference is N; optionally drop gaps.
+    first_has_n = (ref_base == _N_UPPER)
     first_has_gap = (ref_base == _GAP)
-    valid_positions = ~first_has_gap if skip_gaps else np.ones(seq_len, dtype=bool)
+    if skip_gaps:
+        valid_positions = ~first_has_n & ~first_has_gap
+    else:
+        valid_positions = ~first_has_n
 
     # Check if any non-ref matches reference base
     if n_seqs > r_num:
@@ -561,6 +574,7 @@ def go2var_sorted_optimized(
     logger.info("Block size: %d", block_size)
     logger.info("Reference species: %d (r_num=%d)", len(primate_list), ref_threshold)
     logger.info("Merge output: %s", merge_output)
+    logger.info("N-filtering: enabled")
 
     start_time = time.time()
 
