@@ -45,7 +45,7 @@ def test_addpro_promoter_coords(tmp_path):
     out = tmp_path / "out.bed"
     _run([ADDPRO, str(FIXTURE), "-o", str(out)], cwd=tmp_path)
 
-    rows = [l.split("\t") for l in out.read_text().splitlines() if l]
+    rows = [line.split("\t") for line in out.read_text().splitlines() if line]
     intervals = {(r[0], int(r[1]), int(r[2])) for r in rows}
 
     # DDX11L1 - + strand
@@ -66,7 +66,7 @@ def test_addpro_mode_merged(tmp_path):
     out = tmp_path / "merged.bed"
     _run([ADDPRO, str(FIXTURE), "--mode", "merged", "-o", str(out)], cwd=tmp_path)
 
-    rows = [l.split("\t") for l in out.read_text().splitlines() if l]
+    rows = [line.split("\t") for line in out.read_text().splitlines() if line]
     intervals = {(r[0], int(r[1]), int(r[2]), r[5]) for r in rows}
 
     assert ("chr1", 10873, 14409, "+") in intervals, "DDX11L1 merged interval wrong"
@@ -87,8 +87,8 @@ def test_addpro_mode_both(tmp_path):
     assert sep.exists() and sep.stat().st_size > 0, "separate.bed missing"
     assert mer.exists() and mer.stat().st_size > 0, "merged.bed missing"
 
-    n_sep = sum(1 for l in sep.read_text().splitlines() if l)
-    n_mer = sum(1 for l in mer.read_text().splitlines() if l)
+    n_sep = sum(1 for line in sep.read_text().splitlines() if line)
+    n_mer = sum(1 for line in mer.read_text().splitlines() if line)
     assert n_sep == 2 * n_mer, f"separate ({n_sep}) should be 2x merged ({n_mer})"
 
 
@@ -97,7 +97,7 @@ def test_addpro_upstream_param(tmp_path):
     out = tmp_path / "out_500.bed"
     _run([ADDPRO, str(FIXTURE), "--upstream", "500", "-o", str(out)], cwd=tmp_path)
 
-    rows = [l.split("\t") for l in out.read_text().splitlines() if l]
+    rows = [line.split("\t") for line in out.read_text().splitlines() if line]
     intervals = {(r[0], int(r[1]), int(r[2])) for r in rows}
 
     # Gene bodies unchanged
