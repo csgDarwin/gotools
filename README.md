@@ -2,10 +2,11 @@
 
 Fast conserved-site and variant detection from MAF multiple sequence alignments.
 
-`gotools` provides two command-line tools:
+`gotools` provides three command-line tools:
 
 - **`go2fix`** — scans a MAF alignment for conserved positions (identical base across ≥ N rows, no Ns, no gaps) and outputs a BED file of conserved intervals.
 - **`go2var`** — scans a MAF alignment for positions where non-reference species diverge from the reference (skipping reference `N` and gap positions), using a JSON config to define species threshold and ordering, and outputs a BED file of variant intervals.
+- **`addpro`** — parses a GTF, emits gene-body + 1 kb upstream promoter intervals as a BED file, renames RefSeq accessions (NC_*.* → chrN), and drops non-standard chromosomes. Streams output row-by-row so memory use is O(1) regardless of input size.
 
 ---
 
@@ -13,7 +14,7 @@ Fast conserved-site and variant detection from MAF multiple sequence alignments.
 
 **Software dependencies:**
 - Python ≥ 3.8 (tested on 3.8, 3.10, 3.12)
-- `numpy` ≥ 1.20 (only runtime third-party dependency; tested with numpy 2.4.4)
+- `numpy` ≥ 1.20 (tested with numpy 2.4.4)
 
 ---
 
@@ -25,7 +26,7 @@ Fast conserved-site and variant detection from MAF multiple sequence alignments.
 pip install git+https://github.com/csgDarwin/gotools.git@main
 ```
 
-After install, the commands `go2fix` and `go2var` are on your PATH.
+After install, the commands `go2fix`, `go2var`, and `addpro` are on your PATH.
 
 ### Option 2 — clone and install editable
 
@@ -53,6 +54,22 @@ go2fix input.maf.gz -m 464 -o output_dir/ --workers 8
 
 See `go2fix --help` for full options.
 
+---
+
+## Choosing `-m` (`--max-conserved`)
+
+`-m` is the minimum number of MAF rows that must agree at a position for it to be called conserved. **It must match the number of haplotype rows in your MAF block.** If `-m` is set higher than the row count, the output BED will be **empty**.
+
+| Alignment                         | `-m` |
+|-----------------------------------|------|
+| Full HPRC pangenome               | 464  |
+| HPRCv2 subset                     | 363  |
+
+Verify the row count in your MAF before running:
+
+The default (`-m 464`) is intended for the full HPRC pangenome; tune it for any other alignment.
+
+
 ### `go2var` — find variant positions
 
 ```bash
@@ -76,20 +93,28 @@ See `go2var --help` for full options.
 }
 ```
 
----
+### `addpro` — generate gene + 1 kb promoter BED from a GTF
 
-## Choosing `-m` (`--max-conserved`)
+```bash
+addpro annotation.gtf -o annotation.1kbpromoter.bed
+addpro annotation.gtf.gz -o annotation.1kbpromoter.bed   # gzip supported
+addpro annotation.gtf --mode merged -o annotation.gene1kb.bed
+addpro annotation.gtf --mode both   -o annotation          # writes annotation.separate.bed + annotation.merged.bed
+addpro annotation.gtf --upstream 500 -o annotation.500bp.bed
+addpro annotation.gtf --no-filter                          # keep all chromosomes
+```
 
-`-m` is the minimum number of MAF rows that must agree at a position for it to be called conserved. **It must match the number of haplotype rows in your MAF block.** If `-m` is set higher than the row count, the output BED will be **empty**.
+- `input_gtf` — GTF annotation file (plain text or `.gtf.gz`)
+- `-o / --output` — output BED path (default: `<input_basename>.1kbpromoter.bed` alongside the input)
+- `--mode {separate,merged,both}` — output layout (default: `separate`)
+  - `separate` — two rows per gene: gene body + upstream promoter as distinct intervals
+  - `merged` — one row per gene: gene body and upstream promoter as a single merged interval
+  - `both` — writes two files using `-o` as a prefix: `<prefix>.separate.bed` and `<prefix>.merged.bed`
+- `--upstream N` — promoter width in bp (default: 1000)
+- `-n / --no-filter` — keep rows whose chromosome name does not start with `chr` (default: drop them)
 
-| Alignment                         | `-m` |
-|-----------------------------------|------|
-| Full HPRC pangenome               | 464  |
-| HPRCv2 subset                     | 363  |
+The BED `name` column contains the gene symbol (`gene_name` attribute, falling back to `gene` then `gene_id`). RefSeq accessions (`NC_000001.11`, `NC_000023.11`, etc.) are automatically renamed to UCSC-style names (`chr1`, `chrX`, etc.) for GRCh38.p14.
 
-Verify the row count in your MAF before running:
-
-The default (`-m 464`) is intended for the full HPRC pangenome; tune it for any other alignment.
 
 ---
 

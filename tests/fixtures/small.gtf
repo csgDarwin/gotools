@@ -1,0 +1,9 @@
+#gtf-version 2.2
+#!genome-build GRCh38.p14
+# Minimal fixture for addpro tests — three real genes from hg38.14genomic.gtf
+# DDX11L1 : NC_000001.11, + strand, [11874, 14409]  -> chr1:11873-14409, promoter chr1:10873-11873
+# WASH7P  : NC_000001.11, - strand, [14362, 29370]  -> chr1:14361-29370, promoter chr1:29370-30370
+# LOC...  : NT_187361.1 (alt contig), dropped by default filter; kept with --no-filter
+NC_000001.11	BestRefSeq	gene	11874	14409	.	+	.	gene_id "DDX11L1"; transcript_id ""; db_xref "GeneID:100287102"; db_xref "HGNC:HGNC:37102"; description "DEAD/H-box helicase 11 like 1 (pseudogene)"; gbkey "Gene"; gene "DDX11L1"; gene_biotype "transcribed_pseudogene"; pseudo "true";
+NC_000001.11	BestRefSeq	gene	14362	29370	.	-	.	gene_id "WASH7P"; transcript_id ""; db_xref "GeneID:653635"; db_xref "HGNC:HGNC:38034"; description "WASP family homolog 7, pseudogene"; gbkey "Gene"; gene "WASH7P"; gene_biotype "transcribed_pseudogene"; gene_synonym "FAM39F"; gene_synonym "WASH5P"; pseudo "true";
+NT_187361.1	Gnomon	gene	1287	72892	.	+	.	gene_id "LOC105379854"; transcript_id ""; db_xref "GeneID:105379854"; description "uncharacterized LOC105379854"; gbkey "Gene"; gene "LOC105379854"; gene_biotype "lncRNA";

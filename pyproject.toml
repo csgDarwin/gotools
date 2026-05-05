@@ -37,6 +37,7 @@ dev = [
 [project.scripts]
 go2fix = "gotools.go2fix:main"
 go2var = "gotools.go2var:main"
+addpro = "gotools.addpro:main"
 
 [project.urls]
 Repository = "https://github.com/csgDarwin/gotools"

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-05
+
+### Added
+- `addpro --mode {separate,merged,both}` (default `separate`).
+- `addpro --upstream N` (default 1000) for configurable promoter width.
+
+### Changed
+- `addpro` BED `name` column is now a gene symbol (`gene_name` → `gene` →
+  `gene_id`); duplicate symbols suffixed with `|<gene_id>`.
+
 ## [0.1.1] - 2026-05-03
 
 ### Fixed
