@@ -4,8 +4,8 @@ title: "gotools: fast conserved-site and variant detection from MAF multiple seq
 authors:
   - alias: csgDarwin
     email: csg2darwin@gmail.com
-version: 0.1.0
-date-released: 2026-04-28
+version: 0.2.0
+date-released: 2026-05-05
 license: MIT
 repository-code: "https://github.com/csgDarwin/gotools"
 url: "https://github.com/csgDarwin/gotools"
