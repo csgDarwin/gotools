@@ -2,8 +2,10 @@ cff-version: 1.2.0
 message: "If you use gotools, please cite it using the metadata below."
 title: "gotools: fast conserved-site and variant detection from MAF multiple sequence alignments"
 authors:
-  - alias: csgDarwin
-    email: csg2darwin@gmail.com
+  - {family-names: Goh, given-names: Chern-Sing, email: csg2darwin@gmail.com}
+  - {family-names: Davenport, given-names: "Matthew H."}
+  - {family-names: Lee, given-names: Chul}
+  - {family-names: Jarvis, given-names: "Erich D."}
 version: 0.2.0
 date-released: 2026-05-05
 license: MIT
@@ -16,3 +18,16 @@ keywords:
   - conserved-sites
   - variant-calling
   - comparative-genomics
+preferred-citation:
+  type: article
+  title: "Fixed human pangenome sequences reveal origins of common human traits"
+  authors:
+    - {family-names: Goh, given-names: Chern-Sing}
+    - {family-names: Davenport, given-names: "Matthew H."}
+    - {family-names: Lee, given-names: Chul}
+    - {family-names: Jarvis, given-names: "Erich D."}
+  year: 2026
+  journal: "bioRxiv"
+  doi: "10.64898/2026.04.30.722098"
+  url: "https://www.biorxiv.org/content/10.64898/2026.04.30.722098v1"
+  notes: "Preprint"

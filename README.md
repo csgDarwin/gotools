@@ -179,7 +179,11 @@ If both commands complete and produce non-empty BED files matching the formats a
 
 ## Citation
 
-See [`CITATION.cff`](CITATION.cff). A formal citation will be added on publication.
+If you use `gotools`, please cite the preprint:
+
+> Goh C-S, Davenport MH, Lee C, Jarvis ED. (2026). Fixed human pangenome sequences reveal origins of common human traits. *bioRxiv*. https://doi.org/10.64898/2026.04.30.722098
+
+Software-level metadata (version, release date) is in [`CITATION.cff`](CITATION.cff).
 
 ---
 
