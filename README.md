@@ -54,8 +54,6 @@ go2fix input.maf.gz -m 464 -o output_dir/ --workers 8
 
 See `go2fix --help` for full options.
 
----
-
 #### Choosing `-m` (`--max-conserved`)
 
 `-m` is the minimum number of MAF rows that must agree at a position for it to be called conserved. **It must match the number of haplotype rows in your MAF block.** If `-m` is set higher than the row count, the output BED will be **empty**.
@@ -69,6 +67,7 @@ Verify the row count in your MAF before running:
 
 The default (`-m 464`) is intended for the full HPRC pangenome; tune it for any other alignment.
 
+---
 
 ### `go2var` — find variant positions
 
@@ -92,6 +91,7 @@ See `go2var --help` for full options.
   "AlignOrderList": ["hg38", "hs1", "panTro6", "gorGor6", "ponAbe3"]
 }
 ```
+---
 
 ### `addpro` — generate gene + 1 kb promoter BED from a GTF
 
