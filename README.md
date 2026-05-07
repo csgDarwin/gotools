@@ -6,7 +6,7 @@ Fast conserved-site and variant detection from MAF multiple sequence alignments.
 
 - **`go2fix`** — scans a MAF alignment for conserved positions (identical base across ≥ N rows, no Ns, no gaps) and outputs a BED file of conserved intervals.
 - **`go2var`** — scans a MAF alignment for positions where non-reference species diverge from the reference (skipping reference `N` and gap positions), using a JSON config to define species threshold and ordering, and outputs a BED file of variant intervals.
-- **`addpro`** — parses a GTF, emits gene-body + 1 kb upstream promoter intervals as a BED file, renames RefSeq accessions (NC_*.* → chrN), and drops non-standard chromosomes. Streams output row-by-row so memory use is O(1) regardless of input size.
+- **`addpro`** — parses a GTF, emits gene-body + 1 kb upstream promoter intervals as a BED file, renames RefSeq accessions (NC_*.* → chrN), and drops non-standard chromosomes.
 
 ---
 
